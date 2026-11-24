@@ -1,0 +1,30 @@
+name: Publish TURBO v2.4.4
+on:
+  push:
+    branches: [main]
+    paths: [".github/workflows/publish-turbo-2.4.4.yml"]
+permissions:
+  contents: write
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify package against signed manifest
+        run: |
+          python3 - <<'PY'
+          import base64, hashlib, json
+          from pathlib import Path
+          manifest = json.loads(Path("releases/v2.4.4/latest.json").read_text())
+          payload = json.loads(base64.b64decode(manifest["payload"]))
+          data = Path("releases/v2.4.4/turbo.exe").read_bytes()
+          assert payload["version"] == "2.4.4"
+          assert payload["file"] == "turbo.exe"
+          assert payload["size"] == len(data)
+          assert payload["sha256"].lower() == hashlib.sha256(data).hexdigest()
+          PY
+      - name: Publish release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create v2.4.4 releases/v2.4.4/turbo.exe releases/v2.4.4/latest.json --target "$GITHUB_SHA" --title "TURBO v2.4.4" --notes "TURBO v2.4.4 includes startup repaint fixes, responsive layouts, and verified power and NVIDIA settings." --latest
