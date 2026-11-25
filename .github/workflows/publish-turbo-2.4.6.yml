@@ -1,0 +1,30 @@
+name: Publish TURBO v2.4.6
+on:
+  push:
+    branches: [main]
+    paths: [".github/workflows/publish-turbo-2.4.6.yml"]
+permissions:
+  contents: write
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify package against signed manifest
+        run: |
+          python3 - <<'PY'
+          import base64, hashlib, json
+          from pathlib import Path
+          manifest = json.loads(Path("releases/v2.4.6/latest.json").read_text())
+          payload = json.loads(base64.b64decode(manifest["payload"]))
+          data = Path("releases/v2.4.6/turbo.exe").read_bytes()
+          assert payload["version"] == "2.4.6"
+          assert payload["file"] == "turbo.exe"
+          assert payload["size"] == len(data)
+          assert payload["sha256"].lower() == hashlib.sha256(data).hexdigest()
+          PY
+      - name: Publish release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create v2.4.6 releases/v2.4.6/turbo.exe releases/v2.4.6/latest.json --target "$GITHUB_SHA" --title "TURBO v2.4.6" --notes "TURBO v2.4.6 includes one-click cleanup for the current user's NVIDIA DirectX shader cache in System Cleanup." --latest
