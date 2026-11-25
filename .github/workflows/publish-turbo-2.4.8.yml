@@ -1,0 +1,30 @@
+name: Publish TURBO v2.4.8
+on:
+  push:
+    branches: [main]
+    paths: [".github/workflows/publish-turbo-2.4.8.yml"]
+permissions:
+  contents: write
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify package against signed manifest
+        run: |
+          python3 - <<'PY'
+          import base64, hashlib, json
+          from pathlib import Path
+          manifest = json.loads(Path("releases/v2.4.8/latest.json").read_text())
+          payload = json.loads(base64.b64decode(manifest["payload"]))
+          data = Path("releases/v2.4.8/turbo.exe").read_bytes()
+          assert payload["version"] == "2.4.8"
+          assert payload["file"] == "turbo.exe"
+          assert payload["size"] == len(data)
+          assert payload["sha256"].lower() == hashlib.sha256(data).hexdigest()
+          PY
+      - name: Publish release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create v2.4.8 releases/v2.4.8/turbo.exe releases/v2.4.8/latest.json --target "$GITHUB_SHA" --title "TURBO v2.4.8" --notes "重做 CPU 核心页，支持按进程分配逻辑处理器和保存自动规则。修复 NVIDIA 桌面缩放选择，加入分组的全局 3D 设置。DSR 通过页内入口在 NVIDIA 控制面板中调整。" --latest
