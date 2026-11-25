@@ -1,0 +1,72 @@
+name: Publish TURBO setup package
+
+on:
+  push:
+    branches: [main]
+    paths: ['TURBO-v*-Setup.zip']
+  workflow_dispatch:
+    inputs:
+      package:
+        description: Root ZIP filename to publish
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: turbo-setup-releases
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify the signed bundle and publish release assets
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          BEFORE: ${{ github.event.before }}
+          REQUESTED_PACKAGE: ${{ inputs.package }}
+        run: |
+          packages=()
+          temp=$(mktemp -d)
+          trap 'rm -rf -- "$temp"' EXIT
+          if [[ "$GITHUB_EVENT_NAME" == 'workflow_dispatch' ]]; then
+            packages=("$REQUESTED_PACKAGE")
+          else
+            if [[ "$BEFORE" == '0000000000000000000000000000000000000000' ]]; then
+              BEFORE=$(git hash-object -w -t tree /dev/null)
+            fi
+            git diff --name-only --diff-filter=AM -z "$BEFORE" "$GITHUB_SHA" -- \
+              ':(top,glob)TURBO-v*-Setup.zip' > "$temp/packages"
+            sort -zV "$temp/packages" > "$temp/sorted"
+            mapfile -d '' -t packages < "$temp/sorted"
+          fi
+
+          for bundle in "${packages[@]}"; do
+            if [[ ! "$bundle" =~ ^TURBO-v[0-9]+\.[0-9]+\.[0-9]+-Setup\.zip$ || ! -f "$bundle" || -L "$bundle" ]]; then
+              echo "A TURBO setup ZIP must be a regular file at the repository root." >&2
+              exit 1
+            fi
+            tag=${bundle#TURBO-}
+            tag=${tag%-Setup.zip}
+            if git show-ref --verify --quiet "refs/tags/$tag" || gh release view "$tag" >/dev/null 2>&1; then
+              echo "Release or tag $tag already exists. Existing assets were kept."
+              continue
+            fi
+            latest=$(gh release list --exclude-drafts --exclude-pre-releases --limit 100 \
+              --json tagName,isLatest --jq '.[] | select(.isLatest) | .tagName')
+            assets="$temp/$tag"
+            verified=$(python3 release-tools/verify-setup.py "$bundle" "$assets" \
+              --public-key release-tools/turbo-update-public.pem --latest "$latest")
+            [[ "$verified" == "$tag" ]]
+            gh release create "$tag" "$bundle" "$assets/turbo.exe" "$assets/latest.json" \
+              --target "$GITHUB_SHA" --title "TURBO $tag" --notes-file "$assets/release-notes.txt" --latest
+          done
